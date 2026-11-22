@@ -27,7 +27,7 @@ jobs:
   build-geodata:
     name: Build aios-geodata (${{ matrix.id }})
     if: github.event_name == 'push' || inputs.packages == 'all' || inputs.packages == 'aios-geodata'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -78,7 +78,7 @@ jobs:
   build-cores:
     name: Build Cores (${{ matrix.id }} / ${{ matrix.arch }})
     if: github.event_name == 'push' || inputs.packages != 'aios-geodata'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -254,7 +254,7 @@ jobs:
       startsWith(github.ref, 'refs/tags/') &&
       (needs.build-geodata.result == 'success' || needs.build-geodata.result == 'skipped') &&
       (needs.build-cores.result == 'success' || needs.build-cores.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Download All Build Artifacts
         uses: actions/download-artifact@v8
