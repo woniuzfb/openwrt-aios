@@ -182,6 +182,15 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: 'stable'
+          cache: false
+
+      - name: Cache OpenWrt DL & Go Modules
+        uses: actions/cache@v5
+        with:
+          path: ~/cache/dl
+          key: openwrt-dl-${{ matrix.id }}-${{ hashFiles('packages/aios-xray/Makefile', 'packages/aios-v2ray/Makefile') }}
+          restore-keys: |
+            openwrt-dl-${{ matrix.id }}-
 
       - name: Install Dependencies
         run: |
@@ -201,6 +210,9 @@ jobs:
           wget -q -O "$SDK_FILE" "${{ matrix.sdk_url_path }}/${SDK_FILE}"
           sha256sum -c sha256sums.small
           tar -C "$SDK_HOME" --strip-components=1 -xf "$SDK_FILE"
+          mkdir -p ~/cache/dl
+          rm -rf "$SDK_HOME/dl"
+          ln -s ~/cache/dl "$SDK_HOME/dl"
           cd "$SDK_HOME"
           cp feeds.conf.default feeds.conf
           sed -i 's#git.openwrt.org/openwrt/openwrt#github.com/openwrt/openwrt#' feeds.conf
