@@ -1,0 +1,43 @@
+name: Update Upstream Versions
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target to update (all, xray, v2ray, geodata)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - xray
+          - v2ray
+          - geodata
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run scripts/update.sh
+        run: |
+          chmod +x scripts/update.sh
+          ./scripts/update.sh "${{ inputs.target || 'all' }}"
+
+      - name: Commit Updated Makefiles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet packages/; then
+            git add packages/
+            git commit -m "chore: bump upstream versions and SHA256 hashes"
+            git push
+          else
+            echo "No upstream changes detected."
+          fi

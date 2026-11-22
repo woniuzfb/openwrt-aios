@@ -1,48 +1,277 @@
-name: Build and Release
+name: Build and Release AIOS Packages
 
 on:
   push:
     tags:
-      - "v*.*.*"
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Packages to build (all, aios-xray, aios-v2ray, aios-geodata)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - aios-xray
+          - aios-v2ray
+          - aios-geodata
+
+permissions:
+  contents: write
+
+env:
+  CACHE_DIR: ~/cache
 
 jobs:
-  build_release:
+  build-geodata:
+    name: Build aios-geodata (${{ matrix.id }})
+    if: github.event_name == 'push' || inputs.packages == 'all' || inputs.packages == 'aios-geodata'
     runs-on: ubuntu-latest
-    name: Build openwrt-xray
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: '23.05'
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64
+            sdk_name: -sdk-23.05.5-x86-64_
+          - id: '25.12'
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/x86/64
+            sdk_name: -sdk-25.12.4-x86-64_
     steps:
-      - name: Build for aarch64_cortex-a53
+      - uses: actions/checkout@v7
+
+      - name: Install Dependencies
+        run: |
+          DEBIAN_FRONTEND=noninteractive sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gettext libncurses5-dev xsltproc
+
+      - name: Download and Extract OpenWrt SDK
+        run: |
+          SDK_HOME="$(mktemp -d)"
+          echo "SDK_HOME=${SDK_HOME}" >> "$GITHUB_ENV"
+          mkdir -p /tmp/sdk
+          cd /tmp/sdk
+          wget -q -O - "${{ matrix.sdk_url_path }}/sha256sums" | grep -- "${{ matrix.sdk_name }}" > sha256sums.small
+          SDK_FILE="$(awk '{print $2}' sha256sums.small | sed 's/^\*//')"
+          wget -q -O "$SDK_FILE" "${{ matrix.sdk_url_path }}/${SDK_FILE}"
+          sha256sum -c sha256sums.small
+          tar -C "$SDK_HOME" --strip-components=1 -xf "$SDK_FILE"
+
+      - name: Build aios-geodata
+        run: |
+          cd "$SDK_HOME"
+          mkdir -p package/aios
+          ln -s "${{ github.workspace }}/packages/aios-geodata" package/aios/aios-geodata
+          make defconfig
+          make package/aios-geodata/compile V=s
+          mkdir -p "${{ github.workspace }}/dist"
+          find "$SDK_HOME/bin/" -type f \( -name "aios-geodata*.ipk" -o -name "aios-geodata*.apk" \) -exec cp {} "${{ github.workspace }}/dist/" \;
+          ls -lh "${{ github.workspace }}/dist/"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: aios-geodata-${{ matrix.id }}
+          path: dist/*
+
+  build-cores:
+    name: Build Cores (${{ matrix.id }} / ${{ matrix.arch }})
+    if: github.event_name == 'push' || inputs.packages != 'aios-geodata'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # OpenWrt 23.05 (.ipk)
+          - id: '23.05'
+            arch: x86_64
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64
+            sdk_name: -sdk-23.05.5-x86-64_
+          - id: '23.05'
+            arch: aarch64_cortex-a53
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/bcm27xx/bcm2710
+            sdk_name: -sdk-23.05.5-bcm27xx-bcm2710_
+          - id: '23.05'
+            arch: aarch64_cortex-a72
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/mvebu/cortexa72
+            sdk_name: -sdk-23.05.5-mvebu-cortexa72_
+          - id: '23.05'
+            arch: aarch64_generic
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/layerscape/armv8_64b
+            sdk_name: -sdk-23.05.5-layerscape-armv8_64b_
+          - id: '23.05'
+            arch: arm_cortex-a7_neon-vfpv4
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/bcm27xx/bcm2709
+            sdk_name: -sdk-23.05.5-bcm27xx-bcm2709_
+          - id: '23.05'
+            arch: arm_cortex-a9
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/bcm53xx/generic
+            sdk_name: -sdk-23.05.5-bcm53xx-generic_
+          - id: '23.05'
+            arch: arm_cortex-a9_vfpv3-d16
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/mvebu/cortexa9
+            sdk_name: -sdk-23.05.5-mvebu-cortexa9_
+          - id: '23.05'
+            arch: arm_cortex-a15_neon-vfpv4
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/ipq806x/generic
+            sdk_name: -sdk-23.05.5-ipq806x-generic_
+          - id: '23.05'
+            arch: mipsel_24kc
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt7620
+            sdk_name: -sdk-23.05.5-ramips-mt7620_
+          - id: '23.05'
+            arch: mips_24kc
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/ath79/generic
+            sdk_name: -sdk-23.05.5-ath79-generic_
+          - id: '23.05'
+            arch: i386_pentium4
+            sdk_url_path: https://downloads.openwrt.org/releases/23.05.5/targets/x86/generic
+            sdk_name: -sdk-23.05.5-x86-generic_
+
+          # OpenWrt 25.12 (.apk)
+          - id: '25.12'
+            arch: x86_64
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/x86/64
+            sdk_name: -sdk-25.12.4-x86-64_
+          - id: '25.12'
+            arch: aarch64_cortex-a53
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/bcm27xx/bcm2710
+            sdk_name: -sdk-25.12.4-bcm27xx-bcm2710_
+          - id: '25.12'
+            arch: aarch64_cortex-a72
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/mvebu/cortexa72
+            sdk_name: -sdk-25.12.4-mvebu-cortexa72_
+          - id: '25.12'
+            arch: aarch64_generic
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/layerscape/armv8_64b
+            sdk_name: -sdk-25.12.4-layerscape-armv8_64b_
+          - id: '25.12'
+            arch: arm_cortex-a7_neon-vfpv4
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/bcm27xx/bcm2709
+            sdk_name: -sdk-25.12.4-bcm27xx-bcm2709_
+          - id: '25.12'
+            arch: arm_cortex-a9
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/bcm53xx/generic
+            sdk_name: -sdk-25.12.4-bcm53xx-generic_
+          - id: '25.12'
+            arch: arm_cortex-a9_vfpv3-d16
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/mvebu/cortexa9
+            sdk_name: -sdk-25.12.4-mvebu-cortexa9_
+          - id: '25.12'
+            arch: arm_cortex-a15_neon-vfpv4
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/ipq806x/generic
+            sdk_name: -sdk-25.12.4-ipq806x-generic_
+          - id: '25.12'
+            arch: mipsel_24kc
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/ramips/mt7620
+            sdk_name: -sdk-25.12.4-ramips-mt7620_
+          - id: '25.12'
+            arch: mips_24kc
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/ath79/generic
+            sdk_name: -sdk-25.12.4-ath79-generic_
+          - id: '25.12'
+            arch: i386_pentium4
+            sdk_url_path: https://downloads.openwrt.org/releases/25.12.4/targets/x86/generic
+            sdk_name: -sdk-25.12.4-x86-generic_
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+
+      - name: Install Dependencies
+        run: |
+          DEBIAN_FRONTEND=noninteractive sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y ccache gettext libncurses5-dev xsltproc
+
+      - name: Download and Prepare SDK
         env:
-          WORKSPACE: ${{ github.workspace }}
-        uses: woniuzfb/openwrt-xray/.github/targets/aarch64_cortex-a53@v1
+          OPENWRT_GOLANG_REF: ${{ vars.OPENWRT_GOLANG_COMMIT }}
+        run: |
+          SDK_HOME="$(mktemp -d)"
+          echo "SDK_HOME=${SDK_HOME}" >> "$GITHUB_ENV"
+          mkdir -p /tmp/sdk
+          cd /tmp/sdk
+          wget -q -O - "${{ matrix.sdk_url_path }}/sha256sums" | grep -- "${{ matrix.sdk_name }}" > sha256sums.small
+          SDK_FILE="$(awk '{print $2}' sha256sums.small | sed 's/^\*//')"
+          wget -q -O "$SDK_FILE" "${{ matrix.sdk_url_path }}/${SDK_FILE}"
+          sha256sum -c sha256sums.small
+          tar -C "$SDK_HOME" --strip-components=1 -xf "$SDK_FILE"
+          cd "$SDK_HOME"
+          cp feeds.conf.default feeds.conf
+          sed -i 's#git.openwrt.org/openwrt/openwrt#github.com/openwrt/openwrt#' feeds.conf
+          sed -i 's#git.openwrt.org/feed/packages#github.com/openwrt/packages#' feeds.conf
+          sed -i 's#git.openwrt.org/project/luci#github.com/openwrt/luci#' feeds.conf
+          ./scripts/feeds update -a
+          rm -rf feeds/packages/lang/golang
+          mkdir -p feeds/packages/lang
+          GOLANG_REF="${OPENWRT_GOLANG_REF:-master}"
+          curl -fsSL "https://codeload.github.com/openwrt/packages/tar.gz/${GOLANG_REF}" \
+            | tar -xz -C feeds/packages/lang --strip-components=2 --wildcards '*/lang/golang'
+          mkdir -p package/aios
+          ln -s "${{ github.workspace }}/packages/aios-xray" package/aios/aios-xray
+          ln -s "${{ github.workspace }}/packages/aios-v2ray" package/aios/aios-v2ray
+          ./scripts/feeds install -a
+
+      - name: Compile Packages
+        run: |
+          cd "$SDK_HOME"
+          make defconfig
+          TARGET="${{ inputs.packages || 'all' }}"
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "aios-xray" ]; then
+            make package/aios-xray/compile V=s
+          fi
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "aios-v2ray" ]; then
+            make package/aios-v2ray/compile V=s
+          fi
+          mkdir -p "${{ github.workspace }}/dist"
+          find "$SDK_HOME/bin/" -type f \( -name "aios-xray*.ipk" -o -name "aios-xray*.apk" -o -name "aios-v2ray*.ipk" -o -name "aios-v2ray*.apk" \) | while read -r f; do
+            base="$(basename "$f")"
+            ext="${base##*.}"
+            if [ "$ext" = "apk" ]; then
+              cp "$f" "${{ github.workspace }}/dist/${base%.*}-${{ matrix.arch }}.apk"
+            else
+              cp "$f" "${{ github.workspace }}/dist/${base}"
+            fi
+          done
+          ls -lh "${{ github.workspace }}/dist/"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
         with:
-          compress-goproxy: 'n'
-          exclude-assets: 'n'
-          compress-upx: 'y'
-          compatibility-mode: 'n'
-      - name: Build for aarch64_generic
-        env:
-          WORKSPACE: ${{ github.workspace }}
-        uses: woniuzfb/openwrt-xray/.github/targets/aarch64_generic@v1
+          name: aios-cores-${{ matrix.id }}-${{ matrix.arch }}
+          path: dist/*
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-geodata, build-cores]
+    if: >-
+      always() &&
+      startsWith(github.ref, 'refs/tags/') &&
+      (needs.build-geodata.result == 'success' || needs.build-geodata.result == 'skipped') &&
+      (needs.build-cores.result == 'success' || needs.build-cores.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Build Artifacts
+        uses: actions/download-artifact@v8
         with:
-          compress-goproxy: 'n'
-          exclude-assets: 'n'
-          compress-upx: 'y'
-          compatibility-mode: 'n'
-      - name: Build for x86_64
-        env:
-          WORKSPACE: ${{ github.workspace }}
-        uses: woniuzfb/openwrt-xray/.github/targets/x86_64@v1
-        id: last_build
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256 Checksums
+        run: |
+          cd release-assets
+          sha256sum *.ipk *.apk 2>/dev/null | sort -k2 > sha256sums.txt || sha256sum * | grep -v 'sha256sums.txt' | sort -k2 > sha256sums.txt
+          ls -lh
+          cat sha256sums.txt
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v3
         with:
-          compress-goproxy: 'n'
-          exclude-assets: 'n'
-          compress-upx: 'y'
-          compatibility-mode: 'n'
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: '*.ipk'
+          files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Done
-        run: echo "Build complete - ${{ steps.last_build.outputs.date }}"
