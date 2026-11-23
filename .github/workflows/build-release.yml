@@ -48,13 +48,29 @@ jobs:
 
       - name: Download and Extract OpenWrt SDK
         run: |
+          retry() {
+            local max_attempts=5 delay=5 attempt=1
+            while true; do
+              if "$@"; then return 0; fi
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "Command failed after ${max_attempts} attempts: $*" >&2
+                return 1
+              fi
+              local sleep_sec=$((delay + RANDOM % 4))
+              echo "Attempt ${attempt}/${max_attempts} failed; retrying in ${sleep_sec}s: $*" >&2
+              sleep "$sleep_sec"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
           SDK_HOME="$(mktemp -d)"
           echo "SDK_HOME=${SDK_HOME}" >> "$GITHUB_ENV"
           mkdir -p /tmp/sdk
           cd /tmp/sdk
-          wget -q -O - "${{ matrix.sdk_url_path }}/sha256sums" | grep -- "${{ matrix.sdk_name }}" > sha256sums.small
+          retry curl -fsSL --connect-timeout 30 --max-time 60 -o sha256sums "${{ matrix.sdk_url_path }}/sha256sums"
+          grep -- "${{ matrix.sdk_name }}" sha256sums > sha256sums.small
           SDK_FILE="$(awk '{print $2}' sha256sums.small | sed 's/^\*//')"
-          wget -q -O "$SDK_FILE" "${{ matrix.sdk_url_path }}/${SDK_FILE}"
+          retry curl -fsSL --connect-timeout 30 --max-time 300 -o "$SDK_FILE" "${{ matrix.sdk_url_path }}/${SDK_FILE}"
           sha256sum -c sha256sums.small
           tar -C "$SDK_HOME" --strip-components=1 -xf "$SDK_FILE"
 
@@ -201,13 +217,29 @@ jobs:
         env:
           OPENWRT_GOLANG_REF: ${{ vars.OPENWRT_GOLANG_COMMIT }}
         run: |
+          retry() {
+            local max_attempts=5 delay=5 attempt=1
+            while true; do
+              if "$@"; then return 0; fi
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "Command failed after ${max_attempts} attempts: $*" >&2
+                return 1
+              fi
+              local sleep_sec=$((delay + RANDOM % 4))
+              echo "Attempt ${attempt}/${max_attempts} failed; retrying in ${sleep_sec}s: $*" >&2
+              sleep "$sleep_sec"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
           SDK_HOME="$(mktemp -d)"
           echo "SDK_HOME=${SDK_HOME}" >> "$GITHUB_ENV"
           mkdir -p /tmp/sdk
           cd /tmp/sdk
-          wget -q -O - "${{ matrix.sdk_url_path }}/sha256sums" | grep -- "${{ matrix.sdk_name }}" > sha256sums.small
+          retry curl -fsSL --connect-timeout 30 --max-time 60 -o sha256sums "${{ matrix.sdk_url_path }}/sha256sums"
+          grep -- "${{ matrix.sdk_name }}" sha256sums > sha256sums.small
           SDK_FILE="$(awk '{print $2}' sha256sums.small | sed 's/^\*//')"
-          wget -q -O "$SDK_FILE" "${{ matrix.sdk_url_path }}/${SDK_FILE}"
+          retry curl -fsSL --connect-timeout 30 --max-time 300 -o "$SDK_FILE" "${{ matrix.sdk_url_path }}/${SDK_FILE}"
           sha256sum -c sha256sums.small
           tar -C "$SDK_HOME" --strip-components=1 -xf "$SDK_FILE"
           mkdir -p ~/cache/dl
@@ -218,12 +250,14 @@ jobs:
           sed -i 's#git.openwrt.org/openwrt/openwrt#github.com/openwrt/openwrt#' feeds.conf
           sed -i 's#git.openwrt.org/feed/packages#github.com/openwrt/packages#' feeds.conf
           sed -i 's#git.openwrt.org/project/luci#github.com/openwrt/luci#' feeds.conf
-          ./scripts/feeds update -a
+          retry ./scripts/feeds update -a
           rm -rf feeds/packages/lang/golang
           mkdir -p feeds/packages/lang
           GOLANG_REF="${OPENWRT_GOLANG_REF:-master}"
-          curl -fsSL "https://codeload.github.com/openwrt/packages/tar.gz/${GOLANG_REF}" \
-            | tar -xz -C feeds/packages/lang --strip-components=2 --wildcards '*/lang/golang'
+          retry curl -fsSL --connect-timeout 30 --max-time 180 -o /tmp/openwrt-packages-golang.tar.gz \
+            "https://codeload.github.com/openwrt/packages/tar.gz/${GOLANG_REF}"
+          tar -xzf /tmp/openwrt-packages-golang.tar.gz -C feeds/packages/lang --strip-components=2 --wildcards '*/lang/golang'
+          rm -f /tmp/openwrt-packages-golang.tar.gz
           mkdir -p package/aios
           ln -s "${{ github.workspace }}/packages/aios-xray" package/aios/aios-xray
           ln -s "${{ github.workspace }}/packages/aios-v2ray" package/aios/aios-v2ray
