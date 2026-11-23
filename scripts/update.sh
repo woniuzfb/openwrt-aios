@@ -57,6 +57,26 @@ latest_tag() {
 	printf '%s\n' "$tag"
 }
 
+latest_tag_including_prerelease() {
+	local repo="$1" json tag
+	local -a curl_args=(-fsSL -H "Accept: application/vnd.github+json")
+	if [ -n "${GITHUB_TOKEN:-}" ]; then
+		curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+	fi
+	json="$(curl "${curl_args[@]}" "https://api.github.com/repos/${repo}/releases?per_page=10")"
+	if command -v jq >/dev/null 2>&1; then
+		tag="$(printf '%s' "$json" | jq -r '[.[] | select(.draft == false and (.tag_name | length > 0))][0].tag_name // empty')"
+	elif command -v python3 >/dev/null 2>&1; then
+		tag="$(printf '%s' "$json" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(next((r["tag_name"] for r in data if not r.get("draft") and r.get("tag_name")), ""))')"
+	else
+		die "jq or python3 is required to parse GitHub releases API for ${repo}"
+	fi
+	if [ -z "$tag" ]; then
+		die "Failed to resolve latest release tag (including prereleases) for ${repo}"
+	fi
+	printf '%s\n' "$tag"
+}
+
 replace_var() {
 	local file="$1" key="$2" val="$3"
 	local tmp="${file}.tmp"
@@ -88,7 +108,7 @@ update_xray() {
 update_v2ray() {
 	local ver="${1:-}"
 	if [ -z "$ver" ]; then
-		ver="$(latest_tag v2fly/v2ray-core)"
+		ver="$(latest_tag_including_prerelease v2fly/v2ray-core)"
 	fi
 	ver="${ver#v}"
 	if ! printf '%s\n' "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then

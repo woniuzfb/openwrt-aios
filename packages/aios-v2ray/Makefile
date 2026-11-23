@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=aios-v2ray
-PKG_VERSION:=5.53.0
+PKG_VERSION:=5.56.0
 PKG_RELEASE:=1
 
 PKG_LICENSE:=MIT
@@ -10,7 +10,7 @@ PKG_MAINTAINER:=AIOS Contributors
 
 PKG_SOURCE:=v2ray-core-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/v2fly/v2ray-core/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=f2a78ff50ce36c4a577a39016485cdfb835a75137d514a0a5e8e9e983f0d38bb
+PKG_HASH:=ab0f2c416d90e6449a49e4ae0da015778a11fc3884dc782e17553234be928475
 
 PKG_BUILD_DEPENDS:=golang/host
 PKG_BUILD_PARALLEL:=1
