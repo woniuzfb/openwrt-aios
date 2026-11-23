@@ -32,9 +32,16 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--update)
 			DO_UPDATE=1
-			if [ $# -ge 2 ] && [[ "${2}" != --* ]]; then
-				UPDATE_TARGET="$2"
-				shift 2
+			if [ $# -ge 2 ]; then
+				case "$2" in
+					all|xray|v2ray|geodata)
+						UPDATE_TARGET="$2"
+						shift 2
+						;;
+					*)
+						shift
+						;;
+				esac
 			else
 				shift
 			fi
@@ -53,7 +60,7 @@ while [ $# -gt 0 ]; do
 			shift
 			;;
 		*)
-			die "Unknown argument: $1 (tag must start with 'v', e.g. v2026.11.22)"
+			die "Unknown argument: $1 (tag must start with 'v', e.g. vYYYY.MM.DD)"
 			;;
 	esac
 done
@@ -69,6 +76,11 @@ fi
 
 if [ -n "$(git status --porcelain)" ]; then
 	die "Working tree is not clean. Commit or stash changes before running release.sh"
+fi
+
+BRANCH="$(git branch --show-current)"
+if [ "$DO_PUSH" -eq 1 ] && [ -z "$BRANCH" ]; then
+	die "Detached HEAD detected; checkout a branch before running release.sh --push"
 fi
 
 if [ "$DO_UPDATE" -eq 1 ]; then
@@ -94,29 +106,55 @@ done
 for mk in packages/aios-xray/Makefile packages/aios-v2ray/Makefile; do
 	grep -qE '^PKG_HASH:=[0-9a-fA-F]{64}$' "$mk" || die "Invalid or missing 64-hex PKG_HASH in $mk"
 done
-grep -qE '^GEOIP_HASH:=[0-9a-fA-F]{64}$' packages/aios-geodata/Makefile || die "Invalid or missing 64-hex GEOIP_HASH in aios-geodata/Makefile"
-grep -qE '^GEOSITE_HASH:=[0-9a-fA-F]{64}$' packages/aios-geodata/Makefile || die "Invalid or missing 64-hex GEOSITE_HASH in aios-geodata/Makefile"
 
-if ! git diff --quiet packages/; then
-	git add packages/
-	git commit -m "chore(release): bump upstream versions for ${TAG}"
-fi
+GEODATA_MK="packages/aios-geodata/Makefile"
+grep -qE '^PKG_VERSION:=[0-9]{14}$' "$GEODATA_MK" || die "PKG_VERSION in aios-geodata/Makefile must be 14 digits"
+grep -qE '^GEOIP_VER:=[0-9]{12,14}$' "$GEODATA_MK" || die "GEOIP_VER in aios-geodata/Makefile must be 12-14 digits"
+grep -qE '^GEOSITE_VER:=[0-9]{12,14}$' "$GEODATA_MK" || die "GEOSITE_VER in aios-geodata/Makefile must be 12-14 digits"
+grep -qE '^GEOIP_HASH:=[0-9a-fA-F]{64}$' "$GEODATA_MK" || die "Invalid or missing 64-hex GEOIP_HASH in aios-geodata/Makefile"
+grep -qE '^GEOSITE_HASH:=[0-9a-fA-F]{64}$' "$GEODATA_MK" || die "Invalid or missing 64-hex GEOSITE_HASH in aios-geodata/Makefile"
+awk '
+	/^define Package\/\$\(PKG_NAME\)[[:space:]]*$/ { in_pkg = 1; next }
+	in_pkg && /^endef[[:space:]]*$/ { in_pkg = 0 }
+	in_pkg && /^[[:space:]]*PKGARCH:=all[[:space:]]*$/ { found = 1 }
+	END { exit (found ? 0 : 1) }
+' "$GEODATA_MK" || die "PKGARCH:=all must be declared inside define Package/\$(PKG_NAME) in aios-geodata/Makefile"
 
 XRAY_VER="$(sed -nE 's/^PKG_VERSION:=(.+)$/\1/p' packages/aios-xray/Makefile)"
 V2RAY_VER="$(sed -nE 's/^PKG_VERSION:=(.+)$/\1/p' packages/aios-v2ray/Makefile)"
 GEO_VER="$(sed -nE 's/^PKG_VERSION:=(.+)$/\1/p' packages/aios-geodata/Makefile)"
 
+if ! git diff --quiet packages/; then
+	git add packages/
+	git commit -m "chore(release): bump upstream versions for ${TAG}" \
+		-m "$(cat <<EOF
+同步上游包版本与精确 SHA256 校验和，准备发布 ${TAG}：
+
+- packages/aios-xray/Makefile: PKG_VERSION=${XRAY_VER}
+- packages/aios-v2ray/Makefile: PKG_VERSION=${V2RAY_VER}
+- packages/aios-geodata/Makefile: PKG_VERSION=${GEO_VER}
+
+已通过 scripts/release.sh 语法、YAML 与 Makefile 门禁校验。
+EOF
+)"
+fi
+
 git tag -a "$TAG" -m "Release ${TAG} (aios-xray ${XRAY_VER}, aios-v2ray ${V2RAY_VER}, aios-geodata ${GEO_VER})"
 BRANCH="$(git branch --show-current)"
-echo "==> Created annotated tag ${TAG} on branch ${BRANCH} (xray=${XRAY_VER}, v2ray=${V2RAY_VER}, geodata=${GEO_VER})."
+echo "==> Created annotated tag ${TAG} on branch ${BRANCH:-<detached>} (xray=${XRAY_VER}, v2ray=${V2RAY_VER}, geodata=${GEO_VER})."
 
 if [ "$DO_PUSH" -eq 1 ]; then
+	[ -n "$BRANCH" ] || die "Detached HEAD detected; cannot push branch to origin"
 	echo "==> Pushing ${BRANCH} and ${TAG} to origin..."
 	git push origin "$BRANCH"
 	git push origin "$TAG"
 	echo "==> Release ${TAG} pushed. Monitor GitHub Actions for SDK matrix builds and Release assets."
 else
 	echo "Dry-push mode (tag created locally). Run the following commands to publish:"
-	echo "  git push origin ${BRANCH}"
+	if [ -n "$BRANCH" ]; then
+		echo "  git push origin ${BRANCH}"
+	else
+		echo "  git push origin HEAD:<branch>"
+	fi
 	echo "  git push origin ${TAG}"
 fi

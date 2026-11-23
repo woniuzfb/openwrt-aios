@@ -27,7 +27,7 @@ define Package/$(PKG_NAME)
   SUBMENU:=Web Servers/Proxies
   TITLE:=V2Ray (v2fly) binary for AIOS (independent namespace)
   URL:=https://github.com/v2fly/v2ray-core
-  DEPENDS:=$(GO_ARCH_DEPENDS) +ca-certificates
+  DEPENDS:=$(GO_ARCH_DEPENDS) +ca-bundle
 endef
 
 define Package/$(PKG_NAME)/description
@@ -63,7 +63,7 @@ define Build/Compile
 	mkdir -p $(PKG_INSTALL_DIR)/bin
 	cd $(PKG_BUILD_DIR) && \
 		$(GO_PKG_VARS) $(USE_GOPROXY) CGO_ENABLED=0 \
-		go build -trimpath -ldflags "-s -w -buildid=" \
+		go build -trimpath -buildvcs=false -ldflags "-s -w -buildid=" \
 		-o $(PKG_INSTALL_DIR)/bin/aios-v2ray ./main
 endef
 

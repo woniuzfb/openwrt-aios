@@ -19,9 +19,13 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: update-packages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -37,8 +41,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet packages/; then
+            XRAY_VER="$(sed -nE 's/^PKG_VERSION:=(.+)$/\1/p' packages/aios-xray/Makefile)"
+            V2RAY_VER="$(sed -nE 's/^PKG_VERSION:=(.+)$/\1/p' packages/aios-v2ray/Makefile)"
+            GEO_VER="$(sed -nE 's/^PKG_VERSION:=(.+)$/\1/p' packages/aios-geodata/Makefile)"
             git add packages/
-            git commit -m "chore: bump upstream versions and SHA256 hashes"
+            git commit -m "chore(packages): bump upstream versions and SHA256 hashes" \
+              -m "$(cat <<EOF
+          通过 update-packages 工作流自动同步上游最新版本与精确 SHA256 校验和：
+
+          - packages/aios-xray/Makefile: PKG_VERSION=${XRAY_VER}
+          - packages/aios-v2ray/Makefile: PKG_VERSION=${V2RAY_VER}
+          - packages/aios-geodata/Makefile: PKG_VERSION=${GEO_VER}
+          EOF
+          )"
             git push
           else
             echo "No upstream changes detected."

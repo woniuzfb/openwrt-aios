@@ -18,10 +18,7 @@ on:
           - aios-geodata
 
 permissions:
-  contents: write
-
-env:
-  CACHE_DIR: ~/cache
+  contents: read
 
 jobs:
   build-geodata:
@@ -82,14 +79,37 @@ jobs:
           make defconfig
           make package/aios-geodata/compile V=s
           mkdir -p "${{ github.workspace }}/dist"
-          find "$SDK_HOME/bin/" -type f \( -name "aios-geodata*.ipk" -o -name "aios-geodata*.apk" \) -exec cp {} "${{ github.workspace }}/dist/" \;
+          while IFS= read -r f; do
+            base="$(basename "$f")"
+            ext="${base##*.}"
+            if [ "$ext" = "apk" ]; then
+              if [ -x "$SDK_HOME/staging_dir/host/bin/apk" ] && "$SDK_HOME/staging_dir/host/bin/apk" adbdump "$f" >/dev/null 2>&1; then
+                if ! "$SDK_HOME/staging_dir/host/bin/apk" adbdump "$f" | grep -Eq 'arch:[[:space:]]*(noarch|all)'; then
+                  echo "ERROR: Expected noarch/all arch in $f" >&2
+                  exit 1
+                fi
+              fi
+              if [[ "$base" != *all*.apk ]]; then
+                cp "$f" "${{ github.workspace }}/dist/${base%.*}-all.apk"
+              else
+                cp "$f" "${{ github.workspace }}/dist/${base}"
+              fi
+            else
+              cp "$f" "${{ github.workspace }}/dist/${base}"
+            fi
+          done < <(find "$SDK_HOME/bin/" -type f \( -name "aios-geodata*.ipk" -o -name "aios-geodata*.apk" \))
           ls -lh "${{ github.workspace }}/dist/"
+          if ! find "${{ github.workspace }}/dist" -maxdepth 1 -type f \( -name "*_all.ipk" -o -name "*all*.apk" \) | grep -q .; then
+            echo "ERROR: Expected non-empty all-arch aios-geodata artifact (*_all.ipk or *all*.apk) in dist/" >&2
+            exit 1
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: aios-geodata-${{ matrix.id }}
           path: dist/*
+          if-no-files-found: error
 
   build-cores:
     name: Build Cores (${{ matrix.id }} / ${{ matrix.arch }})
@@ -204,8 +224,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/cache/dl
-          key: openwrt-dl-${{ matrix.id }}-${{ hashFiles('packages/aios-xray/Makefile', 'packages/aios-v2ray/Makefile') }}
+          key: openwrt-dl-${{ matrix.id }}-${{ matrix.arch }}-${{ hashFiles('packages/aios-xray/Makefile', 'packages/aios-v2ray/Makefile') }}
           restore-keys: |
+            openwrt-dl-${{ matrix.id }}-${{ matrix.arch }}-
             openwrt-dl-${{ matrix.id }}-
 
       - name: Install Dependencies
@@ -285,16 +306,23 @@ jobs:
             fi
           done
           ls -lh "${{ github.workspace }}/dist/"
+          if ! find "${{ github.workspace }}/dist" -maxdepth 1 -type f \( -name "*.ipk" -o -name "*.apk" \) | grep -q .; then
+            echo "ERROR: No core package artifacts (.ipk/.apk) found in dist/" >&2
+            exit 1
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: aios-cores-${{ matrix.id }}-${{ matrix.arch }}
           path: dist/*
+          if-no-files-found: error
 
   release:
     name: Publish GitHub Release
     needs: [build-geodata, build-cores]
+    permissions:
+      contents: write
     if: >-
       always() &&
       startsWith(github.ref, 'refs/tags/') &&
@@ -311,7 +339,12 @@ jobs:
       - name: Generate SHA256 Checksums
         run: |
           cd release-assets
-          sha256sum *.ipk *.apk 2>/dev/null | sort -k2 > sha256sums.txt || sha256sum * | grep -v 'sha256sums.txt' | sort -k2 > sha256sums.txt
+          mapfile -t assets < <(find . -maxdepth 1 -type f \( -name '*.ipk' -o -name '*.apk' \) | sort | sed 's|^\./||')
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "ERROR: No .ipk or .apk assets found in release-assets/" >&2
+            exit 1
+          fi
+          sha256sum "${assets[@]}" > sha256sums.txt
           ls -lh
           cat sha256sums.txt
 
@@ -319,5 +352,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

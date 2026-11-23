@@ -7,7 +7,6 @@ PKG_RELEASE:=1
 
 PKG_LICENSE:=CC-BY-SA-4.0 MIT
 PKG_MAINTAINER:=AIOS Contributors
-PKGARCH:=all
 
 GEOIP_VER:=202611222203
 GEOIP_FILE:=aios-geoip-$(GEOIP_VER).dat
@@ -39,6 +38,7 @@ define Package/$(PKG_NAME)
   SUBMENU:=Web Servers/Proxies
   TITLE:=Shared GeoIP & GeoSite data files for AIOS
   URL:=https://github.com/Loyalsoldier/v2ray-rules-dat
+  PKGARCH:=all
 endef
 
 define Package/$(PKG_NAME)/description

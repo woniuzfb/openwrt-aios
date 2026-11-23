@@ -6,6 +6,20 @@ XRAY_MK="${ROOT_DIR}/packages/aios-xray/Makefile"
 V2RAY_MK="${ROOT_DIR}/packages/aios-v2ray/Makefile"
 GEODATA_MK="${ROOT_DIR}/packages/aios-geodata/Makefile"
 
+CURL_OPTS=(--connect-timeout 15 --max-time 60 --retry 3)
+TMP_FILES=()
+
+cleanup() {
+	local f
+	for f in "${TMP_FILES[@]:-}"; do
+		if [ -n "$f" ]; then
+			rm -f "$f"
+		fi
+	done
+	return 0
+}
+trap cleanup EXIT INT TERM
+
 usage() {
 	cat <<'EOF'
 Usage:
@@ -47,9 +61,98 @@ sha256_stdin() {
 	fi
 }
 
+get_var() {
+	local file="$1" key="$2"
+	awk -v k="$key" 'index($0, k ":=") == 1 { print substr($0, length(k) + 3); exit }' "$file"
+}
+
+# Returns 0 if version $1 is strictly less than version $2.
+# Supports dotted numeric versions, optional -prerelease suffixes, and 14-digit integers.
+version_lt() {
+	awk -v a="$1" -v b="$2" '
+		function cmp_num(x, y) {
+			sub(/^0+/, "", x); if (x == "") x = "0"
+			sub(/^0+/, "", y); if (y == "") y = "0"
+			if (length(x) != length(y)) return (length(x) < length(y)) ? -1 : 1
+			return (x < y) ? -1 : (x > y ? 1 : 0)
+		}
+		function split_alnum(s, arr,    n, p, tok) {
+			n = 0
+			while (length(s) > 0) {
+				if (match(s, /^[0-9]+/)) {
+					tok = substr(s, 1, RLENGTH)
+					s = substr(s, RLENGTH + 1)
+				} else if (match(s, /^[^0-9]+/)) {
+					tok = substr(s, 1, RLENGTH)
+					s = substr(s, RLENGTH + 1)
+				} else {
+					break
+				}
+				arr[++n] = tok
+			}
+			return n
+		}
+		function cmp_ident(x, y,    n1, n2, m, i, t1, t2, p1, p2, r) {
+			if (x ~ /^[0-9]+$/ && y ~ /^[0-9]+$/) return cmp_num(x, y)
+			n1 = split_alnum(x, t1)
+			n2 = split_alnum(y, t2)
+			m = (n1 < n2) ? n1 : n2
+			for (i = 1; i <= m; i++) {
+				p1 = t1[i]; p2 = t2[i]
+				if (p1 ~ /^[0-9]+$/ && p2 ~ /^[0-9]+$/) {
+					r = cmp_num(p1, p2)
+				} else {
+					r = (p1 < p2) ? -1 : (p1 > p2 ? 1 : 0)
+				}
+				if (r != 0) return r
+			}
+			return (n1 < n2) ? -1 : (n1 > n2 ? 1 : 0)
+		}
+		function cmp_core(s1, s2,    n1, n2, n, i, a1, a2, r) {
+			n1 = split(s1, a1, ".")
+			n2 = split(s2, a2, ".")
+			n = (n1 > n2) ? n1 : n2
+			for (i = 1; i <= n; i++) {
+				r = cmp_ident((i <= n1 ? a1[i] : "0"), (i <= n2 ? a2[i] : "0"))
+				if (r != 0) return r
+			}
+			return 0
+		}
+		function cmp_pre(s1, s2,    n1, n2, m, i, a1, a2, r) {
+			n1 = split(s1, a1, ".")
+			n2 = split(s2, a2, ".")
+			m = (n1 < n2) ? n1 : n2
+			for (i = 1; i <= m; i++) {
+				r = cmp_ident(a1[i], a2[i])
+				if (r != 0) return r
+			}
+			return (n1 < n2) ? -1 : (n1 > n2 ? 1 : 0)
+		}
+		BEGIN {
+			idx_a = index(a, "-")
+			core_a = (idx_a > 0) ? substr(a, 1, idx_a - 1) : a
+			pre_a  = (idx_a > 0) ? substr(a, idx_a + 1) : ""
+
+			idx_b = index(b, "-")
+			core_b = (idx_b > 0) ? substr(b, 1, idx_b - 1) : b
+			pre_b  = (idx_b > 0) ? substr(b, idx_b + 1) : ""
+
+			r = cmp_core(core_a, core_b)
+			if (r != 0) exit (r < 0 ? 0 : 1)
+
+			if (pre_a == "" && pre_b == "") exit 1
+			if (pre_a != "" && pre_b == "") exit 0
+			if (pre_a == "" && pre_b != "") exit 1
+
+			r = cmp_pre(pre_a, pre_b)
+			exit (r < 0 ? 0 : 1)
+		}
+	'
+}
+
 latest_tag() {
 	local repo="$1" tag
-	tag="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest" \
+	tag="$(curl -fsSLI "${CURL_OPTS[@]}" -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest" \
 		| awk -F'/' '{print $NF}')"
 	if [ -z "$tag" ] || [ "$tag" = "releases" ] || [ "$tag" = "latest" ]; then
 		die "Failed to resolve latest release tag for ${repo} (got '${tag}')"
@@ -59,7 +162,7 @@ latest_tag() {
 
 latest_tag_including_prerelease() {
 	local repo="$1" json tag
-	local -a curl_args=(-fsSL -H "Accept: application/vnd.github+json")
+	local -a curl_args=(-fsSL "${CURL_OPTS[@]}" -H "Accept: application/vnd.github+json")
 	if [ -n "${GITHUB_TOKEN:-}" ]; then
 		curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 	fi
@@ -79,68 +182,132 @@ latest_tag_including_prerelease() {
 
 replace_var() {
 	local file="$1" key="$2" val="$3"
-	local tmp="${file}.tmp"
-	awk -v k="$key" -v v="$val" '
-		index($0, k ":=") == 1 { print k ":=" v; next }
+	local dir tmp
+	dir="$(dirname "$file")"
+	tmp="$(mktemp "${dir}/.tmp.XXXXXX")"
+	TMP_FILES+=("$tmp")
+	if ! awk -v k="$key" -v v="$val" '
+		BEGIN { found = 0 }
+		index($0, k ":=") == 1 { print k ":=" v; found++; next }
 		{ print }
-	' "$file" > "$tmp"
+		END { if (found == 0) exit 2 }
+	' "$file" > "$tmp"; then
+		die "Key '${key}:=' not found in ${file}"
+	fi
 	mv -f "$tmp" "$file"
 }
 
 update_xray() {
-	local ver="${1:-}"
+	local ver="${1:-}" explicit=1
 	if [ -z "$ver" ]; then
+		explicit=0
 		ver="$(latest_tag XTLS/Xray-core)"
 	fi
 	ver="${ver#v}"
 	if ! printf '%s\n' "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then
 		die "Invalid Xray version: '${ver}'"
 	fi
+
+	local cur_ver
+	cur_ver="$(get_var "$XRAY_MK" "PKG_VERSION")"
+	if [ "$explicit" -eq 0 ] && [ -n "$cur_ver" ] && version_lt "$ver" "$cur_ver"; then
+		echo "[aios-xray] Upstream ${ver} is older than current ${cur_ver}; skipping downgrade."
+		return 0
+	fi
+
 	echo "[aios-xray] Fetching SHA256 for v${ver}..."
 	local sha
-	sha="$(curl -fsSL "https://codeload.github.com/XTLS/Xray-core/tar.gz/v${ver}" | sha256_stdin)"
+	sha="$(curl -fsSL "${CURL_OPTS[@]}" "https://codeload.github.com/XTLS/Xray-core/tar.gz/v${ver}" | sha256_stdin)"
 	validate_sha256 "$sha" "aios-xray ${ver}"
-	replace_var "$XRAY_MK" "PKG_VERSION" "$ver"
-	replace_var "$XRAY_MK" "PKG_HASH" "$sha"
+
+	local tmp_mk
+	tmp_mk="$(mktemp "$(dirname "$XRAY_MK")/.xray.XXXXXX")"
+	TMP_FILES+=("$tmp_mk")
+	cp "$XRAY_MK" "$tmp_mk"
+	replace_var "$tmp_mk" "PKG_VERSION" "$ver"
+	if [ "$ver" != "$cur_ver" ]; then
+		replace_var "$tmp_mk" "PKG_RELEASE" "1"
+	fi
+	replace_var "$tmp_mk" "PKG_HASH" "$sha"
+	chmod 0644 "$tmp_mk"
+	mv -f "$tmp_mk" "$XRAY_MK"
 	echo "[aios-xray] Updated to ${ver} (${sha})"
 }
 
 update_v2ray() {
-	local ver="${1:-}"
+	local ver="${1:-}" explicit=1
 	if [ -z "$ver" ]; then
+		explicit=0
 		ver="$(latest_tag_including_prerelease v2fly/v2ray-core)"
 	fi
 	ver="${ver#v}"
 	if ! printf '%s\n' "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then
 		die "Invalid V2Ray version: '${ver}'"
 	fi
+
+	local cur_ver
+	cur_ver="$(get_var "$V2RAY_MK" "PKG_VERSION")"
+	if [ "$explicit" -eq 0 ] && [ -n "$cur_ver" ] && version_lt "$ver" "$cur_ver"; then
+		echo "[aios-v2ray] Upstream ${ver} is older than current ${cur_ver}; skipping downgrade."
+		return 0
+	fi
+
 	echo "[aios-v2ray] Fetching SHA256 for v${ver}..."
 	local sha
-	sha="$(curl -fsSL "https://codeload.github.com/v2fly/v2ray-core/tar.gz/v${ver}" | sha256_stdin)"
+	sha="$(curl -fsSL "${CURL_OPTS[@]}" "https://codeload.github.com/v2fly/v2ray-core/tar.gz/v${ver}" | sha256_stdin)"
 	validate_sha256 "$sha" "aios-v2ray ${ver}"
-	replace_var "$V2RAY_MK" "PKG_VERSION" "$ver"
-	replace_var "$V2RAY_MK" "PKG_HASH" "$sha"
+
+	local tmp_mk
+	tmp_mk="$(mktemp "$(dirname "$V2RAY_MK")/.v2ray.XXXXXX")"
+	TMP_FILES+=("$tmp_mk")
+	cp "$V2RAY_MK" "$tmp_mk"
+	replace_var "$tmp_mk" "PKG_VERSION" "$ver"
+	if [ "$ver" != "$cur_ver" ]; then
+		replace_var "$tmp_mk" "PKG_RELEASE" "1"
+	fi
+	replace_var "$tmp_mk" "PKG_HASH" "$sha"
+	chmod 0644 "$tmp_mk"
+	mv -f "$tmp_mk" "$V2RAY_MK"
 	echo "[aios-v2ray] Updated to ${ver} (${sha})"
 }
 
 update_geodata() {
-	local tag="${1:-}"
-	[ -n "$tag" ] || tag="$(latest_tag Loyalsoldier/v2ray-rules-dat)"
+	local tag="${1:-}" explicit=1
+	if [ -z "$tag" ]; then
+		explicit=0
+		tag="$(latest_tag Loyalsoldier/v2ray-rules-dat)"
+	fi
 	local ver14
 	ver14="$(normalize_ver14 "$tag")"
 
+	local cur_ver
+	cur_ver="$(get_var "$GEODATA_MK" "PKG_VERSION")"
+	if [ "$explicit" -eq 0 ] && [ -n "$cur_ver" ] && version_lt "$ver14" "$cur_ver"; then
+		echo "[aios-geodata] Upstream ${ver14} (tag=${tag}) is older than current ${cur_ver}; skipping downgrade."
+		return 0
+	fi
+
 	echo "[aios-geodata] Fetching Loyalsoldier/v2ray-rules-dat SHA256 for ${tag} (PKG_VERSION=${ver14})..."
 	local geoip_sha geosite_sha
-	geoip_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${tag}/geoip.dat.sha256sum" | awk '{print $1}')"
-	geosite_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${tag}/geosite.dat.sha256sum" | awk '{print $1}')"
+	geoip_sha="$(curl -fsSL "${CURL_OPTS[@]}" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${tag}/geoip.dat.sha256sum" | awk '{print $1}')"
+	geosite_sha="$(curl -fsSL "${CURL_OPTS[@]}" "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${tag}/geosite.dat.sha256sum" | awk '{print $1}')"
 	validate_sha256 "$geoip_sha" "geoip.dat (${tag})"
 	validate_sha256 "$geosite_sha" "geosite.dat (${tag})"
 
-	replace_var "$GEODATA_MK" "PKG_VERSION" "$ver14"
-	replace_var "$GEODATA_MK" "GEOIP_VER" "$tag"
-	replace_var "$GEODATA_MK" "GEOSITE_VER" "$tag"
-	replace_var "$GEODATA_MK" "GEOIP_HASH" "$geoip_sha"
-	replace_var "$GEODATA_MK" "GEOSITE_HASH" "$geosite_sha"
+	local tmp_mk
+	tmp_mk="$(mktemp "$(dirname "$GEODATA_MK")/.geodata.XXXXXX")"
+	TMP_FILES+=("$tmp_mk")
+	cp "$GEODATA_MK" "$tmp_mk"
+	replace_var "$tmp_mk" "PKG_VERSION" "$ver14"
+	if [ "$ver14" != "$cur_ver" ]; then
+		replace_var "$tmp_mk" "PKG_RELEASE" "1"
+	fi
+	replace_var "$tmp_mk" "GEOIP_VER" "$tag"
+	replace_var "$tmp_mk" "GEOSITE_VER" "$tag"
+	replace_var "$tmp_mk" "GEOIP_HASH" "$geoip_sha"
+	replace_var "$tmp_mk" "GEOSITE_HASH" "$geosite_sha"
+	chmod 0644 "$tmp_mk"
+	mv -f "$tmp_mk" "$GEODATA_MK"
 	echo "[aios-geodata] Updated to ${ver14} (tag=${tag}, geoip=${geoip_sha:0:12}..., geosite=${geosite_sha:0:12}...)"
 }
 
