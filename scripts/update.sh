@@ -12,7 +12,7 @@ Usage:
   scripts/update.sh all
   scripts/update.sh xray [version]     # e.g. 26.11.9 (omit to fetch latest release)
   scripts/update.sh v2ray [version]    # e.g. 5.56.0  (omit to fetch latest release)
-  scripts/update.sh geodata [geoip_tag] [geosite_tag]
+  scripts/update.sh geodata [tag]      # Loyalsoldier/v2ray-rules-dat release tag
 EOF
 }
 
@@ -68,38 +68,19 @@ update_v2ray() {
 	echo "[aios-v2ray] Updated to ${ver} (${sha})"
 }
 
-normalize_ver14() {
-	local v="$1"
-	while [ "${#v}" -lt 14 ]; do
-		v="${v}0"
-	done
-	printf '%s' "${v:0:14}"
-}
-
 update_geodata() {
-	local geoip_ver="${1:-}"
-	local geosite_ver="${2:-}"
-	[ -n "$geoip_ver" ] || geoip_ver="$(latest_tag v2fly/geoip)"
-	[ -n "$geosite_ver" ] || geosite_ver="$(latest_tag v2fly/domain-list-community)"
+	local ver="${1:-}"
+	[ -n "$ver" ] || ver="$(latest_tag Loyalsoldier/v2ray-rules-dat)"
 
-	echo "[aios-geodata] Fetching SHA256 for geoip=${geoip_ver}, geosite=${geosite_ver}..."
-	local geoip_sha geosite_sha geoip_norm geosite_norm pkg_ver
-	geoip_sha="$(curl -fsSL "https://github.com/v2fly/geoip/releases/download/${geoip_ver}/geoip.dat.sha256sum" | awk '{print $1}')"
-	geosite_sha="$(curl -fsSL "https://github.com/v2fly/domain-list-community/releases/download/${geosite_ver}/dlc.dat.sha256sum" | awk '{print $1}')"
-	geoip_norm="$(normalize_ver14 "$geoip_ver")"
-	geosite_norm="$(normalize_ver14 "$geosite_ver")"
-	if [ "$geoip_norm" \> "$geosite_norm" ]; then
-		pkg_ver="$geoip_norm"
-	else
-		pkg_ver="$geosite_norm"
-	fi
+	echo "[aios-geodata] Fetching Loyalsoldier/v2ray-rules-dat SHA256 for ${ver}..."
+	local geoip_sha geosite_sha
+	geoip_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${ver}/geoip.dat.sha256sum" | awk '{print $1}')"
+	geosite_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${ver}/geosite.dat.sha256sum" | awk '{print $1}')"
 
-	replace_var "$GEODATA_MK" "PKG_VERSION" "$pkg_ver"
-	replace_var "$GEODATA_MK" "GEOIP_VER" "$geoip_ver"
+	replace_var "$GEODATA_MK" "PKG_VERSION" "$ver"
 	replace_var "$GEODATA_MK" "GEOIP_HASH" "$geoip_sha"
-	replace_var "$GEODATA_MK" "GEOSITE_VER" "$geosite_ver"
 	replace_var "$GEODATA_MK" "GEOSITE_HASH" "$geosite_sha"
-	echo "[aios-geodata] Updated to ${pkg_ver} (geoip=${geoip_ver}, geosite=${geosite_ver})"
+	echo "[aios-geodata] Updated to ${ver} (geoip=${geoip_sha:0:12}..., geosite=${geosite_sha:0:12}...)"
 }
 
 cmd="${1:-}"
@@ -116,7 +97,7 @@ case "$cmd" in
 		update_v2ray "${2:-}"
 		;;
 	geodata)
-		update_geodata "${2:-}" "${3:-}"
+		update_geodata "${2:-}"
 		;;
 	*)
 		usage
