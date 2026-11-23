@@ -16,6 +16,29 @@ Usage:
 EOF
 }
 
+die() {
+	echo "ERROR: $*" >&2
+	exit 1
+}
+
+validate_sha256() {
+	local sha="$1" label="$2"
+	if ! printf '%s\n' "$sha" | grep -qE '^[0-9a-fA-F]{64}$'; then
+		die "Invalid SHA256 for ${label}: '${sha}'"
+	fi
+}
+
+normalize_ver14() {
+	local raw="$1"
+	if ! printf '%s\n' "$raw" | grep -qE '^[0-9]{12,14}$'; then
+		die "Invalid GeoData release tag (expected 12-14 digits): '${raw}'"
+	fi
+	while [ "${#raw}" -lt 14 ]; do
+		raw="${raw}0"
+	done
+	printf '%s\n' "${raw:0:14}"
+}
+
 sha256_stdin() {
 	if command -v sha256sum >/dev/null 2>&1; then
 		sha256sum | awk '{print $1}'
@@ -25,9 +48,13 @@ sha256_stdin() {
 }
 
 latest_tag() {
-	local repo="$1"
-	curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest" \
-		| awk -F'/' '{print $NF}'
+	local repo="$1" tag
+	tag="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest" \
+		| awk -F'/' '{print $NF}')"
+	if [ -z "$tag" ] || [ "$tag" = "releases" ] || [ "$tag" = "latest" ]; then
+		die "Failed to resolve latest release tag for ${repo} (got '${tag}')"
+	fi
+	printf '%s\n' "$tag"
 }
 
 replace_var() {
@@ -46,9 +73,13 @@ update_xray() {
 		ver="$(latest_tag XTLS/Xray-core)"
 	fi
 	ver="${ver#v}"
+	if ! printf '%s\n' "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then
+		die "Invalid Xray version: '${ver}'"
+	fi
 	echo "[aios-xray] Fetching SHA256 for v${ver}..."
 	local sha
 	sha="$(curl -fsSL "https://codeload.github.com/XTLS/Xray-core/tar.gz/v${ver}" | sha256_stdin)"
+	validate_sha256 "$sha" "aios-xray ${ver}"
 	replace_var "$XRAY_MK" "PKG_VERSION" "$ver"
 	replace_var "$XRAY_MK" "PKG_HASH" "$sha"
 	echo "[aios-xray] Updated to ${ver} (${sha})"
@@ -60,27 +91,37 @@ update_v2ray() {
 		ver="$(latest_tag v2fly/v2ray-core)"
 	fi
 	ver="${ver#v}"
+	if ! printf '%s\n' "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$'; then
+		die "Invalid V2Ray version: '${ver}'"
+	fi
 	echo "[aios-v2ray] Fetching SHA256 for v${ver}..."
 	local sha
 	sha="$(curl -fsSL "https://codeload.github.com/v2fly/v2ray-core/tar.gz/v${ver}" | sha256_stdin)"
+	validate_sha256 "$sha" "aios-v2ray ${ver}"
 	replace_var "$V2RAY_MK" "PKG_VERSION" "$ver"
 	replace_var "$V2RAY_MK" "PKG_HASH" "$sha"
 	echo "[aios-v2ray] Updated to ${ver} (${sha})"
 }
 
 update_geodata() {
-	local ver="${1:-}"
-	[ -n "$ver" ] || ver="$(latest_tag Loyalsoldier/v2ray-rules-dat)"
+	local tag="${1:-}"
+	[ -n "$tag" ] || tag="$(latest_tag Loyalsoldier/v2ray-rules-dat)"
+	local ver14
+	ver14="$(normalize_ver14 "$tag")"
 
-	echo "[aios-geodata] Fetching Loyalsoldier/v2ray-rules-dat SHA256 for ${ver}..."
+	echo "[aios-geodata] Fetching Loyalsoldier/v2ray-rules-dat SHA256 for ${tag} (PKG_VERSION=${ver14})..."
 	local geoip_sha geosite_sha
-	geoip_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${ver}/geoip.dat.sha256sum" | awk '{print $1}')"
-	geosite_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${ver}/geosite.dat.sha256sum" | awk '{print $1}')"
+	geoip_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${tag}/geoip.dat.sha256sum" | awk '{print $1}')"
+	geosite_sha="$(curl -fsSL "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${tag}/geosite.dat.sha256sum" | awk '{print $1}')"
+	validate_sha256 "$geoip_sha" "geoip.dat (${tag})"
+	validate_sha256 "$geosite_sha" "geosite.dat (${tag})"
 
-	replace_var "$GEODATA_MK" "PKG_VERSION" "$ver"
+	replace_var "$GEODATA_MK" "PKG_VERSION" "$ver14"
+	replace_var "$GEODATA_MK" "GEOIP_VER" "$tag"
+	replace_var "$GEODATA_MK" "GEOSITE_VER" "$tag"
 	replace_var "$GEODATA_MK" "GEOIP_HASH" "$geoip_sha"
 	replace_var "$GEODATA_MK" "GEOSITE_HASH" "$geosite_sha"
-	echo "[aios-geodata] Updated to ${ver} (geoip=${geoip_sha:0:12}..., geosite=${geosite_sha:0:12}...)"
+	echo "[aios-geodata] Updated to ${ver14} (tag=${tag}, geoip=${geoip_sha:0:12}..., geosite=${geosite_sha:0:12}...)"
 }
 
 cmd="${1:-}"

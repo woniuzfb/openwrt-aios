@@ -40,7 +40,10 @@
 
 ### 铁律 4：严禁未经允许擅自改变 Git 状态
 - 未经用户明确许可，禁止执行 `git add`、`git commit`、`git push`、`git reset` 或修改暂存区。
-- 授权 Commit 时，Commit Message 必须清晰详尽地说明改动背景、范围与验证结果。
+- **授权 Commit 时 Message 必须详尽（严禁单行敷衍提交）**：用户明确授权提交时，Commit Message **禁止仅写单行标题**，必须严格包含：
+  - 规范标题行（`<type>(<scope>): <简明总结>`）；
+  - 空行后的结构化分条正文，逐项写明：**变更背景/问题根因**、**按文件/模块分条列举的具体改动点**（`packages/`、`scripts/`、`.github/workflows/`、`README.md` 等）与**完整验证命令及结果**；
+  - 严禁使用笼统措辞替代具体改动细节，确保 `git log` 独立可读、可追溯。
 
 ### 铁律 5：绝对禁止提交 `.memory/` 目录
 - `.memory/` 仅用于本地上下文沉淀，已加入 `.gitignore`，严禁强制 `git add -f .memory/` 或提交至版本控制。

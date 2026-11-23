@@ -91,6 +91,12 @@ for mk in \
 	fi
 done
 
+for mk in packages/aios-xray/Makefile packages/aios-v2ray/Makefile; do
+	grep -qE '^PKG_HASH:=[0-9a-fA-F]{64}$' "$mk" || die "Invalid or missing 64-hex PKG_HASH in $mk"
+done
+grep -qE '^GEOIP_HASH:=[0-9a-fA-F]{64}$' packages/aios-geodata/Makefile || die "Invalid or missing 64-hex GEOIP_HASH in aios-geodata/Makefile"
+grep -qE '^GEOSITE_HASH:=[0-9a-fA-F]{64}$' packages/aios-geodata/Makefile || die "Invalid or missing 64-hex GEOSITE_HASH in aios-geodata/Makefile"
+
 if ! git diff --quiet packages/; then
 	git add packages/
 	git commit -m "chore(release): bump upstream versions for ${TAG}"

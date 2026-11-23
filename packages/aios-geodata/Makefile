@@ -1,33 +1,33 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=aios-geodata
-# Run ./scripts/update.sh geodata to pin exact release tag and SHA256 hashes
-PKG_VERSION:=202611222203
+# Run ./scripts/update.sh geodata to pin exact release tag, 14-digit monotonic PKG_VERSION, and SHA256 hashes
+PKG_VERSION:=20261122220300
 PKG_RELEASE:=1
 
 PKG_LICENSE:=CC-BY-SA-4.0 MIT
 PKG_MAINTAINER:=AIOS Contributors
 PKGARCH:=all
 
-GEOIP_VER:=$(PKG_VERSION)
+GEOIP_VER:=202611222203
 GEOIP_FILE:=aios-geoip-$(GEOIP_VER).dat
 GEOIP_HASH:=d4ec4c5e5d5a38c1399964ea9fd8c94288426a3b31b483904b67819fc07f4466
 
-GEOSITE_VER:=$(PKG_VERSION)
+GEOSITE_VER:=202611222203
 GEOSITE_FILE:=aios-geosite-$(GEOSITE_VER).dat
 GEOSITE_HASH:=94e6f902cfa9d4d70ebf3c0138d9cc24175b51885c490cb673ee54f5e1b6ce6f
 
 include $(INCLUDE_DIR)/package.mk
 
 define Download/aios-geoip
-  URL:=https://github.com/Loyalsoldier/v2ray-rules-dat/releases/$(if $(filter latest,$(GEOIP_VER)),latest/download,download/$(GEOIP_VER))
+  URL:=https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/$(GEOIP_VER)
   URL_FILE:=geoip.dat
   FILE:=$(GEOIP_FILE)
   HASH:=$(GEOIP_HASH)
 endef
 
 define Download/aios-geosite
-  URL:=https://github.com/Loyalsoldier/v2ray-rules-dat/releases/$(if $(filter latest,$(GEOSITE_VER)),latest/download,download/$(GEOSITE_VER))
+  URL:=https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/$(GEOSITE_VER)
   URL_FILE:=geosite.dat
   FILE:=$(GEOSITE_FILE)
   HASH:=$(GEOSITE_HASH)

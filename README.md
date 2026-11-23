@@ -6,9 +6,9 @@
 
 | 包名 | 架构 | 安装路径 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `aios-xray` | 各目标架构 | `/usr/bin/aios-xray` | Xray-core 静态二进制（`CGO_ENABLED=0 -trimpath -ldflags "-s -w"`，无 UPX，依赖 `+ca-certificates`） |
-| `aios-v2ray` | 各目标架构 | `/usr/bin/aios-v2ray` | V2Ray (v2fly) 静态二进制（`CGO_ENABLED=0 -trimpath -ldflags "-s -w"`，无 UPX，依赖 `+ca-certificates`） |
-| `aios-geodata` | `all` | `/usr/share/aios/geodata/{geoip.dat,geosite.dat}` | 双核共享的 GeoIP / GeoSite 数据文件，全架构通用 |
+| `aios-xray` | 各目标架构 | `/usr/bin/aios-xray` | Xray-core 静态二进制（`CGO_ENABLED=0 -trimpath -ldflags "-s -w -buildid="`，无 UPX，依赖 `+ca-certificates`） |
+| `aios-v2ray` | 各目标架构 | `/usr/bin/aios-v2ray` | V2Ray (v2fly) 静态二进制（`CGO_ENABLED=0 -trimpath -ldflags "-s -w -buildid="`，无 UPX，依赖 `+ca-certificates`） |
+| `aios-geodata` | `all` | `/usr/share/aios/geodata/{geoip.dat,geosite.dat}` | 来自 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) 的双核共享 GeoIP / GeoSite 数据文件，全架构通用 |
 
 ## 设计原则
 
